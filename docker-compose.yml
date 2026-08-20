@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: vercel-redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  upload-service:
+    build: ./vercel-upload-service
+    container_name: vercel-upload-service
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_HOST=redis
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  deploy-service:
+    build: ./vercel-deploy-service
+    container_name: vercel-deploy-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REDIS_HOST=redis
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  request-handler:
+    build: ./vercel-request-handler
+    container_name: vercel-request-handler
+    ports:
+      - "3001:3001"
+    environment:
+      - REDIS_HOST=redis
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  frontend:
+    build: ./frontend
+    container_name: vercel-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - upload-service

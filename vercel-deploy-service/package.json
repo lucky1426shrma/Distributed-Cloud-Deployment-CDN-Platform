@@ -1,0 +1,31 @@
+{
+  "name": "vercel-deploy-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/redis": "^4.0.11",
+    "aws-sdk": "^2.1553.0",
+    "bullmq": "^6.2.1",
+    "dotenv": "^17.4.2",
+    "fs": "^0.0.1-security",
+    "ioredis": "^6.0.0",
+    "path": "^0.12.7",
+    "redis": "^4.6.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}
