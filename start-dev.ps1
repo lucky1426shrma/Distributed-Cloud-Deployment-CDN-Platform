@@ -9,19 +9,19 @@ docker start vercel-redis 2>$null
 
 # 2. Launch Upload Service
 Write-Host "[2/5] Launching Upload Service (Port 3000)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\vercel-upload-service'; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "& { Set-Location -LiteralPath '$PSScriptRoot\vercel-upload-service'; npm run dev }"
 
 # 3. Launch Deploy Worker
 Write-Host "[3/5] Launching Deploy Worker Service..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\vercel-deploy-service'; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "& { Set-Location -LiteralPath '$PSScriptRoot\vercel-deploy-service'; npm run dev }"
 
 # 4. Launch Request Handler
 Write-Host "[4/5] Launching Edge CDN Request Handler (Port 3001)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\vercel-request-handler'; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "& { Set-Location -LiteralPath '$PSScriptRoot\vercel-request-handler'; npm run dev }"
 
 # 5. Launch Frontend
 Write-Host "[5/5] Launching Frontend Dashboard (Port 5173)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\frontend'; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", "& { Set-Location -LiteralPath '$PSScriptRoot\frontend'; npm run dev }"
 
 Write-Host "========================================================" -ForegroundColor Green
 Write-Host "🎉 All 4 microservices launched in separate PowerShell windows!" -ForegroundColor Green

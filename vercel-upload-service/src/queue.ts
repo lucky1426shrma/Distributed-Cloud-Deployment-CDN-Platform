@@ -11,7 +11,8 @@ export const redisConnection = {
 export const buildQueue = new Queue("build-queue", {
     connection: redisConnection,
     defaultJobOptions: {
-        attempts: 3,
+        attempts: 3, 
+        // This means BullMQ can try the job up to 3 times if it fails.
         backoff: {
             type: "exponential",
             delay: 1000,

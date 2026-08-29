@@ -20,22 +20,33 @@ app.use(express.json());
 setupSSELogStream(app);
 
 app.post("/deploy", async (req, res) => {
-    const repoUrl = req.body.repoUrl;
+    let { repoUrl, deploymentType = "auto", rootDirectory = "" } = req.body;
     if (!repoUrl) {
         return res.status(400).json({ error: "repoUrl is required" });
+    }
+
+    // Support GitHub subfolder URLs (e.g. https://github.com/user/repo/tree/main/frontend)
+    if (repoUrl.includes("/tree/")) {
+        const parts = repoUrl.split("/tree/");
+        const cleanRepoUrl = parts[0];
+        const subParts = parts[1].split("/"); // branch/subfolder...
+        subParts.shift(); // remove branch (e.g. main/master)
+        if (subParts.length > 0 && !rootDirectory) {
+            rootDirectory = subParts.join("/");
+        }
+        repoUrl = cleanRepoUrl;
     }
 
     const id = generate();
     const outputPath = path.join(__dirname, `output/${id}`);
 
     try {
-        console.log(`[Upload Service] Fast shallow cloning repo ${repoUrl} to ${outputPath}...`);
+        console.log(`[Upload Service] Fast shallow cloning repo ${repoUrl} (Subfolder: '${rootDirectory}') to ${outputPath}...`);
         await simpleGit().clone(repoUrl, outputPath, ["--depth=1"]);
 
         const files = getAllFiles(outputPath);
         console.log(`[Upload Service] Uploading ${files.length} source files in parallel for ID ${id}...`);
 
-        // Upload all source files concurrently to Backblaze B2/S3
         await Promise.all(
             files.map(file => {
                 const s3Key = file.slice(__dirname.length + 1).replace(/\\/g, "/");
@@ -43,10 +54,10 @@ app.post("/deploy", async (req, res) => {
             })
         );
 
-        await buildQueue.add("build-job", { id, repoUrl }, { jobId: id });
+        await buildQueue.add("build-job", { id, repoUrl, deploymentType, rootDirectory }, { jobId: id });
         await redisClient.hset("status", id, "uploaded");
 
-        console.log(`[Upload Service] Deployment ${id} successfully enqueued in BullMQ build-queue.`);
+        console.log(`[Upload Service] Deployment ${id} (Subfolder: '${rootDirectory}') enqueued in BullMQ build-queue.`);
 
         return res.json({ id });
     } catch (err: any) {

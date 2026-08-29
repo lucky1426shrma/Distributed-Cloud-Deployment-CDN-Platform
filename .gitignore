@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json
+
+# Build Outputs & Compiled Code
+dist/
+*/dist/
+build/
+*/build/
+out/
+*/out/
+
+# Ephemeral Deployment & Upload Workspaces
+output/
+*/output/
+src/output/
+*/src/output/
+
+# Cache & Function Runtimes
+.cache/
+*/.cache/
+.functions/
+*/.functions/
+.cdn_cache/
+*/.cdn_cache/
+
+# Environment Secrets
+.env
+.env.*
+!.env.example
+*.env
+
+# OS / Editor Artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

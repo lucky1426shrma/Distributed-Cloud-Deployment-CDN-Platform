@@ -1,10 +1,12 @@
 import express from "express";
+import fs from "fs";
+import path from "path";
 import { S3 } from "aws-sdk";
 import { config } from "./config";
 import { getL1, setL1, getL2, setL2, computeETag, CacheEntry } from "./cdnCache";
 import { initPurgeSubscriber } from "./purgeSubscriber";
 import { getMetrics, getMetricsContentType, httpRequestCounter, httpRequestDuration } from "./metrics";
-import { executeServerlessFunction } from "./functionRunner";
+import { executeServerlessFunction, FunctionResponse } from "./functionRunner";
 
 const s3Config: S3.ClientConfiguration = {
     accessKeyId: config.S3_ACCESS_KEY_ID,
@@ -16,7 +18,7 @@ if (config.S3_ENDPOINT) {
     s3Config.endpoint = config.S3_ENDPOINT;
 }
 
-const s3 = new S3(s3Config);
+export const s3 = new S3(s3Config);
 const app = express();
 
 app.use(express.json());
@@ -42,8 +44,19 @@ app.all("/*", async (req, res) => {
     const id = host.split(".")[0];
     const rawPath = req.path === "/" ? "/index.html" : req.path;
 
-    // Check if request is a dynamic API route (/api/*)
-    if (rawPath.startsWith("/api/")) {
+    // Helper to send serverless response
+    const sendServerlessResponse = (funcResult: FunctionResponse) => {
+        Object.entries(funcResult.headers || {}).forEach(([headerName, headerVal]) => {
+            res.set(headerName, headerVal);
+        });
+        const durationSec = (Date.now() - startTime) / 1000;
+        httpRequestCounter.inc({ cache_status: "DYNAMIC-API", status_code: funcResult.statusCode.toString() });
+        httpRequestDuration.observe({ cache_status: "DYNAMIC-API", status_code: funcResult.statusCode.toString() }, durationSec);
+        return res.status(funcResult.statusCode).send(funcResult.body);
+    };
+
+    // 1. Explicit Dynamic API route (/api/* or /api)
+    if (rawPath === "/api" || rawPath.startsWith("/api/")) {
         console.log(`[CDN Router] Routing dynamic Serverless API request '${req.method} ${rawPath}' for deployment ${id}...`);
         try {
             const funcResult = await executeServerlessFunction(
@@ -54,21 +67,35 @@ app.all("/*", async (req, res) => {
                 req.query,
                 req.headers
             );
-
-            // Set headers
-            Object.entries(funcResult.headers || {}).forEach(([headerName, headerVal]) => {
-                res.set(headerName, headerVal);
-            });
-
-            const durationSec = (Date.now() - startTime) / 1000;
-            httpRequestCounter.inc({ cache_status: "DYNAMIC-API", status_code: funcResult.statusCode.toString() });
-            httpRequestDuration.observe({ cache_status: "DYNAMIC-API", status_code: funcResult.statusCode.toString() }, durationSec);
-
-            return res.status(funcResult.statusCode).send(funcResult.body);
+            return sendServerlessResponse(funcResult);
         } catch (err: any) {
             console.error(`[CDN Router] Serverless API Execution Error for ${id} ${rawPath}:`, err);
             return res.status(500).json({ error: "Internal Serverless Function Execution Error", details: err.message });
         }
+    }
+
+    // 2. Non-file routes (e.g. /users, /products, /auth/login) - Check if serverless function handles it
+    const isStaticAssetWithExtension = /\.(html|css|js|json|png|jpg|jpeg|svg|ico|woff2?|ttf|webp|mp4|webm)$/i.test(rawPath);
+    const localFunctionExists = fs.existsSync(path.join(__dirname, "../.functions", id));
+
+    if (!isStaticAssetWithExtension || localFunctionExists) {
+        try {
+            const funcResult = await executeServerlessFunction(
+                id,
+                rawPath,
+                req.method,
+                req.body,
+                req.query,
+                req.headers
+            );
+
+            // If a real route handled the request (not the fallback message), return dynamic API response
+            const isFallbackMessage = funcResult.body && typeof funcResult.body === "object" && funcResult.body.message && funcResult.body.message.startsWith("Serverless API Route");
+            if (funcResult.body && !isFallbackMessage) {
+                console.log(`[CDN Router] Serverless backend handled route '${req.method} ${rawPath}' directly.`);
+                return sendServerlessResponse(funcResult);
+            }
+        } catch {}
     }
 
     // Static Asset Handling (CDN L1/L2 Cache + S3 Fetch)
@@ -124,9 +151,24 @@ app.all("/*", async (req, res) => {
                 Key: key,
             }).promise();
         } catch (s3Err: any) {
-            // SPA Fallback: If static asset/HTML route not found, fallback to dist/${id}/index.html for React Router
-            if (!rawPath.includes(".") || rawPath.endsWith(".html")) {
-                console.log(`[CDN Router] Primary asset ${key} not found. Attempting SPA index.html fallback...`);
+            // Clean URL & SPA Fallback:
+            // 1. If user visits /about (no extension), try dist/${id}/about.html
+            // 2. Otherwise fallback to dist/${id}/index.html for React SPA
+            if (!rawPath.includes(".")) {
+                try {
+                    const cleanHtmlKey = `dist/${id}${rawPath}.html`;
+                    contents = await s3.getObject({
+                        Bucket: config.S3_BUCKET_NAME,
+                        Key: cleanHtmlKey,
+                    }).promise();
+                } catch {
+                    const fallbackKey = `dist/${id}/index.html`;
+                    contents = await s3.getObject({
+                        Bucket: config.S3_BUCKET_NAME,
+                        Key: fallbackKey,
+                    }).promise();
+                }
+            } else if (rawPath.endsWith(".html")) {
                 const fallbackKey = `dist/${id}/index.html`;
                 contents = await s3.getObject({
                     Bucket: config.S3_BUCKET_NAME,
@@ -139,7 +181,7 @@ app.all("/*", async (req, res) => {
 
         const body = contents.Body as Buffer;
         const etag = computeETag(body);
-        const contentType = rawPath.endsWith(".html") ? "text/html" :
+        const contentType = (rawPath.endsWith(".html") || !rawPath.includes(".")) ? "text/html" :
                             rawPath.endsWith(".css") ? "text/css" :
                             rawPath.endsWith(".js") ? "application/javascript" :
                             rawPath.endsWith(".svg") ? "image/svg+xml" :

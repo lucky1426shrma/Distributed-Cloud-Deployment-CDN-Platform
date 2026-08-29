@@ -48,15 +48,36 @@ export async function downloadS3Folder(prefix: string) {
     console.log(`[Deploy Service] Successfully downloaded all files for prefix ${prefix}`);
 }
 
-export async function copyFinalDist(id: string) {
-    const folderPath = path.join(__dirname, `output/${id}/dist`);
-    if (!fs.existsSync(folderPath)) {
-        throw new Error(`Build dist directory not found at ${folderPath}`);
+// Upload compiled dist static files AND functions to S3 bucket
+export async function copyFinalDist(id: string, rootDirectory: string = "") {
+    const baseDir = path.join(__dirname, `output/${id}`);
+    const projectDir = rootDirectory ? path.join(baseDir, rootDirectory) : baseDir;
+
+    // 1. Upload dist static assets from projectDir or baseDir
+    let folderPath = path.join(projectDir, "dist");
+    if (!fs.existsSync(folderPath) && fs.existsSync(path.join(baseDir, "dist"))) {
+        folderPath = path.join(baseDir, "dist");
     }
-    const allFiles = getAllFiles(folderPath);
-    for (const file of allFiles) {
-        const destinationKey = `dist/${id}/` + file.slice(folderPath.length + 1).replace(/\\/g, "/");
-        await uploadFile(destinationKey, file);
+    if (fs.existsSync(folderPath)) {
+        const allFiles = getAllFiles(folderPath);
+        for (const file of allFiles) {
+            const destinationKey = `dist/${id}/` + file.slice(folderPath.length + 1).replace(/\\/g, "/");
+            await uploadFile(destinationKey, file);
+        }
+    }
+
+    // 2. Upload functions serverless API bundles from projectDir or baseDir
+    let functionsFolderPath = path.join(projectDir, "functions");
+    if (!fs.existsSync(functionsFolderPath) && fs.existsSync(path.join(baseDir, "functions"))) {
+        functionsFolderPath = path.join(baseDir, "functions");
+    }
+    if (fs.existsSync(functionsFolderPath)) {
+        const funcFiles = getAllFiles(functionsFolderPath);
+        for (const file of funcFiles) {
+            const destinationKey = `functions/${id}/` + file.slice(functionsFolderPath.length + 1).replace(/\\/g, "/");
+            await uploadFile(destinationKey, file);
+            console.log(`[Deploy Service] Uploaded serverless function bundle: ${destinationKey}`);
+        }
     }
 }
 
@@ -81,5 +102,5 @@ const uploadFile = async (fileName: string, localFilePath: string) => {
         Bucket: config.S3_BUCKET_NAME,
         Key: fileName,
     }).promise();
-    console.log(`[Deploy Service] Uploaded final build asset ${fileName}`);
+    console.log(`[Deploy Service] Uploaded asset ${fileName}`);
 };
