@@ -22,6 +22,7 @@ export function Landing() {
   const [uploadId, setUploadId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -44,7 +45,7 @@ export function Landing() {
   useEffect(() => {
     if (!uploadId) return;
 
-    console.log(`[Frontend] Connecting to SSE log stream for ${uploadId}...`);
+    console.log(`[Frontend] Connecting to SSE log stream at ${BACKEND_UPLOAD_URL}/logs/${uploadId}...`);
     const eventSource = new EventSource(`${BACKEND_UPLOAD_URL}/logs/${uploadId}`);
 
     eventSource.onmessage = (event) => {
@@ -60,8 +61,7 @@ export function Landing() {
     };
 
     eventSource.onerror = (err) => {
-      console.warn("[Frontend] SSE connection closed or error:", err);
-      eventSource.close();
+      console.warn("[Frontend] SSE connection closed or waiting:", err);
     };
 
     return () => {
@@ -80,9 +80,11 @@ export function Landing() {
     if (!repoUrl) return;
     setUploading(true);
     setLogs([]);
+    setErrorMessage("");
     setStatus("uploading");
 
     try {
+      console.log(`[Frontend] Sending deploy request to ${BACKEND_UPLOAD_URL}/deploy...`);
       const res = await axios.post(`${BACKEND_UPLOAD_URL}/deploy`, {
         repoUrl,
         deploymentType,
@@ -94,8 +96,9 @@ export function Landing() {
       localStorage.setItem("lastDeploymentId", newId);
       window.history.pushState({ path: `/?id=${newId}` }, "", `/?id=${newId}`);
     } catch (err: any) {
-      console.error("Upload/Deploy error:", err);
-      alert(err.response?.data?.error || "Failed to trigger deployment.");
+      const msg = err.response?.data?.error || err.message || "Failed to trigger deployment.";
+      console.error(`[Frontend] Deployment error calling ${BACKEND_UPLOAD_URL}/deploy:`, err);
+      setErrorMessage(`Error calling ${BACKEND_UPLOAD_URL}: ${msg}`);
       setStatus("failed");
     } finally {
       setUploading(false);
@@ -107,6 +110,7 @@ export function Landing() {
     setRepoUrl("");
     setRootDirectory("");
     setStatus("");
+    setErrorMessage("");
     setLogs([]);
     setDeploymentType("auto");
     localStorage.removeItem("lastDeploymentId");
@@ -197,6 +201,13 @@ export function Landing() {
                "Deploy Project"}
             </Button>
           </div>
+
+          {/* Error Notice */}
+          {errorMessage && (
+            <div className="mt-4 p-3 rounded-lg border border-red-500/50 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-xs">
+              <strong>Deployment Error:</strong> {errorMessage}
+            </div>
+          )}
 
           {/* Real-time Status Badge */}
           {status && (

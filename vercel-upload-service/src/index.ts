@@ -13,10 +13,26 @@ import { setupSSELogStream } from "./sseLogs";
 const redisClient = new Redis(redisConnection);
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// Setup Server-Sent Events (SSE) build log stream endpoint (/logs?id=...)
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-deployment-id"],
+}));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Health check endpoint
+app.get("/", (req, res) => {
+    res.json({ service: "vercel-upload-service", status: "healthy", timestamp: new Date().toISOString() });
+});
+
+app.get("/health", (req, res) => {
+    res.json({ service: "vercel-upload-service", status: "healthy" });
+});
+
+// Setup Server-Sent Events (SSE) build log stream endpoint (/logs/:id)
 setupSSELogStream(app);
 
 app.post("/deploy", async (req, res) => {
