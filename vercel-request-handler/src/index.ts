@@ -22,7 +22,12 @@ if (config.S3_ENDPOINT) {
 export const s3 = new S3(s3Config);
 const app = express();
 
-app.use(cors());
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-deployment-id", "If-None-Match"],
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -38,6 +43,37 @@ app.get("/metrics", async (req, res) => {
         res.status(500).end(err.message);
     }
 });
+
+// Helper for MIME types
+function getMimeType(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    switch (ext) {
+        case ".html": return "text/html; charset=UTF-8";
+        case ".css": return "text/css; charset=UTF-8";
+        case ".js":
+        case ".mjs": return "application/javascript; charset=UTF-8";
+        case ".json":
+        case ".map": return "application/json";
+        case ".svg": return "image/svg+xml";
+        case ".png": return "image/png";
+        case ".jpg":
+        case ".jpeg": return "image/jpeg";
+        case ".gif": return "image/gif";
+        case ".webp": return "image/webp";
+        case ".avif": return "image/avif";
+        case ".ico": return "image/x-icon";
+        case ".woff2": return "font/woff2";
+        case ".woff": return "font/woff";
+        case ".ttf": return "font/ttf";
+        case ".otf": return "font/otf";
+        case ".wasm": return "application/wasm";
+        case ".mp4": return "video/mp4";
+        case ".webm": return "video/webm";
+        case ".txt": return "text/plain; charset=UTF-8";
+        case ".xml": return "application/xml";
+        default: return "application/octet-stream";
+    }
+}
 
 // Dynamic API & Static File Router
 app.all("/*", async (req, res) => {
@@ -87,7 +123,7 @@ app.all("/*", async (req, res) => {
     }
 
     // 2. Non-file routes (e.g. /users, /products, /auth/login) - Check if serverless function handles it
-    const isStaticAssetWithExtension = /\.(html|css|js|json|png|jpg|jpeg|svg|ico|woff2?|ttf|webp|mp4|webm)$/i.test(rawPath);
+    const isStaticAssetWithExtension = /\.(html|css|js|mjs|json|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|otf|webp|avif|wasm|mp4|webm|map|txt|xml)$/i.test(rawPath);
     const localFunctionExists = fs.existsSync(path.join(__dirname, "../.functions", id));
 
     if (!isStaticAssetWithExtension || localFunctionExists) {
@@ -193,14 +229,7 @@ app.all("/*", async (req, res) => {
 
         const body = contents.Body as Buffer;
         const etag = computeETag(body);
-        const contentType = (rawPath.endsWith(".html") || !rawPath.includes(".")) ? "text/html" :
-                            rawPath.endsWith(".css") ? "text/css" :
-                            rawPath.endsWith(".js") ? "application/javascript" :
-                            rawPath.endsWith(".svg") ? "image/svg+xml" :
-                            rawPath.endsWith(".json") ? "application/json" :
-                            rawPath.endsWith(".png") ? "image/png" :
-                            rawPath.endsWith(".jpg") || rawPath.endsWith(".jpeg") ? "image/jpeg" :
-                            "application/octet-stream";
+        const contentType = !rawPath.includes(".") ? "text/html; charset=UTF-8" : getMimeType(rawPath);
 
         const entry: CacheEntry = {
             body,
