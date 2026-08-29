@@ -65,8 +65,8 @@ worker.on("failed", (job, err) => {
     console.error(`[Deploy Service] Job ${job?.id} failed with error:`, err);
 });
 
-// Lightweight Health Check HTTP server for Render / Cloud Port Binding
-const healthPort = process.env.PORT || 3002;
+// Lightweight Health Check HTTP server for Render / Cloud Port Binding (avoiding conflict with Upload Service on port 3000)
+const healthPort = process.env.DEPLOY_PORT || (process.env.PORT && process.env.PORT !== "3000" ? process.env.PORT : 3002);
 http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "healthy", service: "deploy-worker", uptime: process.uptime() }));
