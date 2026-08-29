@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { useState, useEffect, useRef } from "react"
 import axios from "axios"
 
-const BACKEND_UPLOAD_URL = "http://localhost:3000";
+const BACKEND_UPLOAD_URL = import.meta.env.VITE_BACKEND_UPLOAD_URL || "http://localhost:3000";
+const REQUEST_HANDLER_URL = import.meta.env.VITE_REQUEST_HANDLER_URL || "http://localhost:3001";
 
 interface LogMessage {
   log: string;
@@ -39,39 +40,28 @@ export function Landing() {
     }
   }, []);
 
-  // 2. Connect to Pure SSE Stream (Handles BOTH Build Logs AND Status Updates with ZERO Polling!)
+  // 2. Real-Time SSE Log Streaming Listener
   useEffect(() => {
     if (!uploadId) return;
 
-    const newUrl = `${window.location.pathname}?id=${uploadId}`;
-    window.history.replaceState({ path: newUrl }, "", newUrl);
-    localStorage.setItem("lastDeploymentId", uploadId);
-
-    const sseUrl = `${BACKEND_UPLOAD_URL}/logs?id=${uploadId}`;
-    const eventSource = new EventSource(sseUrl);
+    console.log(`[Frontend] Connecting to SSE log stream for ${uploadId}...`);
+    const eventSource = new EventSource(`${BACKEND_UPLOAD_URL}/logs/${uploadId}`);
 
     eventSource.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        
-        if (data.log) {
-          setLogs((prev) => [...prev, data]);
-        }
-
+        const data: LogMessage = JSON.parse(event.data);
+        setLogs((prev) => [...prev, data]);
         if (data.status) {
           setStatus(data.status);
-          if (data.status === "deployed" || data.status === "failed") {
-            console.log(`[SSE Frontend] Build reached final state '${data.status}'. Closing SSE stream.`);
-            eventSource.close();
-          }
         }
       } catch (err) {
-        console.error("Failed to parse SSE event data:", err);
+        console.error("Error parsing SSE log event:", err);
       }
     };
 
     eventSource.onerror = (err) => {
-      console.warn("SSE connection closed or reconnecting:", err);
+      console.warn("[Frontend] SSE connection closed or error:", err);
+      eventSource.close();
     };
 
     return () => {
@@ -79,7 +69,7 @@ export function Landing() {
     };
   }, [uploadId]);
 
-  // Auto-scroll build log window to bottom
+  // 3. Auto-scroll terminal to bottom on new logs
   useEffect(() => {
     if (logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
@@ -90,12 +80,23 @@ export function Landing() {
     if (!repoUrl) return;
     setUploading(true);
     setLogs([]);
+    setStatus("uploading");
+
     try {
-      const res = await axios.post(`${BACKEND_UPLOAD_URL}/deploy`, { repoUrl, deploymentType, rootDirectory });
-      setUploadId(res.data.id);
-      setStatus("uploaded");
+      const res = await axios.post(`${BACKEND_UPLOAD_URL}/deploy`, {
+        repoUrl,
+        deploymentType,
+        rootDirectory: rootDirectory.trim() || undefined,
+      });
+
+      const newId = res.data.id;
+      setUploadId(newId);
+      localStorage.setItem("lastDeploymentId", newId);
+      window.history.pushState({ path: `/?id=${newId}` }, "", `/?id=${newId}`);
     } catch (err: any) {
+      console.error("Upload/Deploy error:", err);
       alert(err.response?.data?.error || "Failed to trigger deployment.");
+      setStatus("failed");
     } finally {
       setUploading(false);
     }
@@ -112,8 +113,21 @@ export function Landing() {
     window.history.replaceState({ path: window.location.pathname }, "", window.location.pathname);
   };
 
-  const deployedUrl = `http://${uploadId}.localhost:3001/index.html`;
-  const apiUrl = `http://${uploadId}.localhost:3001/api/`;
+  const getDeployedUrls = () => {
+    if (!uploadId) return { deployedUrl: "", apiUrl: "" };
+    if (REQUEST_HANDLER_URL.includes("localhost")) {
+      return {
+        deployedUrl: `http://${uploadId}.localhost:3001/index.html`,
+        apiUrl: `http://${uploadId}.localhost:3001/api/`,
+      };
+    }
+    return {
+      deployedUrl: `${REQUEST_HANDLER_URL}/index.html?id=${uploadId}`,
+      apiUrl: `${REQUEST_HANDLER_URL}/api/?id=${uploadId}`,
+    };
+  };
+
+  const { deployedUrl, apiUrl } = getDeployedUrls();
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
@@ -138,132 +152,136 @@ export function Landing() {
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)} 
                 placeholder="https://github.com/username/repo or .../tree/main/frontend" 
-                disabled={uploading || !!uploadId}
+                disabled={uploading || status === "uploading" || status === "building"}
               />
             </div>
 
-            {/* Optional Monorepo Subfolder Directory */}
-            <div className="space-y-2">
-              <Label htmlFor="root-directory">Root Directory / Subfolder (Optional)</Label>
-              <Input 
-                id="root-directory"
-                value={rootDirectory}
-                onChange={(e) => setRootDirectory(e.target.value)} 
-                placeholder="e.g. frontend or backend (leave blank for root)" 
-                disabled={uploading || !!uploadId}
-              />
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="root-dir">Root / Subfolder Directory (Optional)</Label>
+                <Input 
+                  id="root-dir"
+                  value={rootDirectory}
+                  onChange={(e) => setRootDirectory(e.target.value)} 
+                  placeholder="e.g. backend, packages/app" 
+                  disabled={uploading || status === "uploading" || status === "building"}
+                />
+              </div>
 
-            {/* Framework / Deployment Preset Selector */}
-            <div className="space-y-2">
-              <Label htmlFor="framework-preset">Framework / Deployment Preset</Label>
-              <select
-                id="framework-preset"
-                value={deploymentType}
-                onChange={(e) => setDeploymentType(e.target.value)}
-                disabled={uploading || !!uploadId}
-                className="w-full flex h-10 items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-950 dark:text-gray-100 dark:border-gray-800"
-              >
-                <option value="auto">⚡ Auto-Detect (Smart Inspection)</option>
-                <option value="react">⚛️ React / Vite / Vue SPA</option>
-                <option value="static">📄 Static HTML / CSS</option>
-                <option value="next">⚡ Next.js (Static / SSR)</option>
-                <option value="express">🟢 Node.js / Express Serverless Backend</option>
-              </select>
+              <div className="space-y-2">
+                <Label htmlFor="deploy-type">Framework Preset</Label>
+                <select
+                  id="deploy-type"
+                  value={deploymentType}
+                  onChange={(e) => setDeploymentType(e.target.value)}
+                  disabled={uploading || status === "uploading" || status === "building"}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="auto">Auto Detect</option>
+                  <option value="react">React / Vite</option>
+                  <option value="nextjs">Next.js (SSG)</option>
+                  <option value="express">Node.js / Express Serverless</option>
+                  <option value="static">Static HTML</option>
+                </select>
+              </div>
             </div>
 
             <Button 
               onClick={handleDeploy} 
-              disabled={!repoUrl || uploading || !!uploadId} 
+              disabled={uploading || !repoUrl || status === "uploading" || status === "building"} 
               className="w-full"
             >
-              {uploadId ? `Deploying ID: ${uploadId}` : uploading ? "Uploading Source Files..." : "Deploy Repository"}
+              {uploading || status === "uploading" ? "Uploading Source Code..." : 
+               status === "building" ? "Building in Isolated Sandbox..." : 
+               status === "deployed" ? "Redeploy Repository" : 
+               "Deploy Project"}
             </Button>
           </div>
+
+          {/* Real-time Status Badge */}
+          {status && (
+            <div className="mt-4 flex items-center justify-between p-3 rounded-lg border bg-gray-100 dark:bg-gray-800">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-semibold">Deployment Status:</span>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium uppercase tracking-wider ${
+                  status === "deployed" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-500" :
+                  status === "building" ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 animate-pulse border border-blue-500" :
+                  status === "uploading" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-500" :
+                  "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-500"
+                }`}>
+                  {status}
+                </span>
+              </div>
+              {uploadId && <span className="text-xs text-gray-500">ID: {uploadId}</span>}
+            </div>
+          )}
+
+          {/* Terminal / Live Build Logs Stream */}
+          {uploadId && (
+            <div className="mt-4 space-y-2">
+              <div className="flex justify-between items-center">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-gray-500">Real-Time Build Telemetry Logs</Label>
+                {status === "building" && <span className="text-xs text-blue-500 animate-pulse">● Live streaming</span>}
+              </div>
+              <div 
+                ref={logContainerRef}
+                className="bg-black text-gray-200 font-mono text-xs p-4 rounded-lg h-56 overflow-y-auto border border-gray-800 shadow-inner flex flex-col space-y-1"
+              >
+                {logs.length === 0 ? (
+                  <p className="text-gray-500 italic">Connecting to worker output stream...</p>
+                ) : (
+                  logs.map((msg, index) => (
+                    <div key={index} className="flex items-start space-x-2">
+                      <span className="text-gray-500 select-none">{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ""}</span>
+                      <span className={
+                        msg.type === "stderr" ? "text-red-400" :
+                        msg.type === "info" ? "text-emerald-400" :
+                        "text-gray-300"
+                      }>
+                        {msg.log}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Deployed Success Links */}
+          {status === "deployed" && (
+            <div className="mt-6 p-4 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-500/30 rounded-xl space-y-3">
+              <div className="flex items-center space-x-2 text-emerald-600 dark:text-emerald-400 font-medium">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span>Application is Live on Edge CDN!</span>
+              </div>
+              
+              <div className="space-y-2">
+                <div>
+                  <Label className="text-xs text-gray-500">Static / Frontend URL:</Label>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <Input readOnly value={deployedUrl} className="text-xs font-mono bg-white dark:bg-gray-900" />
+                    <Button size="sm" onClick={() => window.open(deployedUrl, "_blank")}>
+                      Open
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-xs text-gray-500">Serverless Dynamic API Route:</Label>
+                  <div className="flex items-center space-x-2 mt-1">
+                    <Input readOnly value={apiUrl} className="text-xs font-mono bg-white dark:bg-gray-900" />
+                    <Button size="sm" variant="secondary" onClick={() => window.open(apiUrl, "_blank")}>
+                      Test API
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Terminal Live Build Log Viewer (Pure SSE Stream) */}
-      {uploadId && (
-        <Card className="w-full max-w-2xl mt-6 border border-gray-800 bg-gray-950 text-gray-100 font-mono shadow-2xl">
-          <CardHeader className="border-b border-gray-800 pb-3">
-            <div className="flex justify-between items-center">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-green-400">
-                <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                Container Build Logs [{uploadId}]
-              </CardTitle>
-              <span className={`text-xs px-2 py-0.5 rounded font-bold uppercase ${
-                status === "deployed" ? "bg-green-900 text-green-300" :
-                status === "failed" ? "bg-red-900 text-red-300" :
-                status === "building" ? "bg-blue-900 text-blue-300" : "bg-gray-800 text-gray-300"
-              }`}>
-                {status || "Initializing"}
-              </span>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <div 
-              ref={logContainerRef}
-              className="h-64 overflow-y-auto space-y-1 text-xs leading-relaxed p-2 rounded bg-black/50 border border-gray-900"
-            >
-              {logs.length === 0 ? (
-                <div className="text-gray-500 italic">Connecting & replaying SSE build log history...</div>
-              ) : (
-                logs.map((item, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <span className="text-gray-600 select-none">
-                      {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : ""}
-                    </span>
-                    <span className={
-                      item.type === "stderr" ? "text-red-400" :
-                      item.type === "info" ? "text-cyan-400 font-bold" : "text-gray-200"
-                    }>
-                      {item.log}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Deployment Deployed URL Result */}
-      {status === "deployed" && (
-        <Card className="w-full max-w-2xl mt-6 border-green-500/50 bg-green-950/20">
-          <CardHeader>
-            <CardTitle className="text-xl text-green-400">🎉 Deployment Successful!</CardTitle>
-            <CardDescription>Your service is live on the Edge CDN with sub-15ms response times.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Live API Endpoint Link */}
-            <div className="space-y-2">
-              <Label htmlFor="api-url" className="text-emerald-400 font-semibold">Serverless API Endpoint Link</Label>
-              <div className="flex gap-2">
-                <Input id="api-url" readOnly type="url" value={apiUrl} className="font-mono text-sm border-emerald-800 bg-gray-950 text-emerald-300" />
-                <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" asChild>
-                  <a href={apiUrl} target="_blank" rel="noopener noreferrer">
-                    Open API ⚡
-                  </a>
-                </Button>
-              </div>
-            </div>
-
-            {/* Static Website Link */}
-            <div className="space-y-2 pt-2 border-t border-gray-800">
-              <Label htmlFor="deployed-url" className="text-gray-400">Static Status / Web Link</Label>
-              <div className="flex gap-2">
-                <Input id="deployed-url" readOnly type="url" value={deployedUrl} className="font-mono text-sm" />
-                <Button variant="outline" asChild>
-                  <a href={deployedUrl} target="_blank" rel="noopener noreferrer">
-                    Visit Site 🌐
-                  </a>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </main>
   );
 }

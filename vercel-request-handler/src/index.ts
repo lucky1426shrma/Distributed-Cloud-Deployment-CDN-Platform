@@ -1,6 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import cors from "cors";
 import { S3 } from "aws-sdk";
 import { config } from "./config";
 import { getL1, setL1, getL2, setL2, computeETag, CacheEntry } from "./cdnCache";
@@ -21,6 +22,7 @@ if (config.S3_ENDPOINT) {
 export const s3 = new S3(s3Config);
 const app = express();
 
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,7 +43,17 @@ app.get("/metrics", async (req, res) => {
 app.all("/*", async (req, res) => {
     const startTime = Date.now();
     const host = req.hostname;
-    const id = host.split(".")[0];
+    let id = host.split(".")[0];
+
+    // Fallback: If hosted on a cloud domain like onrender.com without wildcard subdomains
+    if (req.query.id) {
+        id = req.query.id as string;
+    } else if (req.query.__id) {
+        id = req.query.__id as string;
+    } else if (req.headers["x-deployment-id"]) {
+        id = req.headers["x-deployment-id"] as string;
+    }
+
     const rawPath = req.path === "/" ? "/index.html" : req.path;
 
     // Helper to send serverless response
