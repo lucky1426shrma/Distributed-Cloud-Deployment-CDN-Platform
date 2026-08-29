@@ -5,8 +5,11 @@ import { Button } from "@/components/ui/button"
 import { useState, useEffect, useRef } from "react"
 import axios from "axios"
 
-const BACKEND_UPLOAD_URL = import.meta.env.VITE_BACKEND_UPLOAD_URL || "http://localhost:3000";
-const REQUEST_HANDLER_URL = import.meta.env.VITE_REQUEST_HANDLER_URL || "http://localhost:3001";
+const rawBackendUrl = import.meta.env.VITE_BACKEND_UPLOAD_URL || "http://localhost:3000";
+const BACKEND_UPLOAD_URL = rawBackendUrl.trim().replace(/\/+$/, "");
+
+const rawRequestHandlerUrl = import.meta.env.VITE_REQUEST_HANDLER_URL || "http://localhost:3001";
+const REQUEST_HANDLER_URL = rawRequestHandlerUrl.trim().replace(/\/+$/, "");
 
 interface LogMessage {
   log: string;
@@ -98,7 +101,7 @@ export function Landing() {
     } catch (err: any) {
       const msg = err.response?.data?.error || err.message || "Failed to trigger deployment.";
       console.error(`[Frontend] Deployment error calling ${BACKEND_UPLOAD_URL}/deploy:`, err);
-      setErrorMessage(`Error calling ${BACKEND_UPLOAD_URL}: ${msg}`);
+      setErrorMessage(`Error calling ${BACKEND_UPLOAD_URL}/deploy: ${msg}`);
       setStatus("failed");
     } finally {
       setUploading(false);
