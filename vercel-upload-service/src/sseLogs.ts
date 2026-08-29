@@ -3,12 +3,11 @@ import Redis from "ioredis";
 import { config } from "./config";
 
 export function setupSSELogStream(app: Express): void {
-    // getting the express app from the index.js file to set up SSE 
-    app.get("/logs", (req: Request, res: Response) => {
-        const deploymentId = req.query.id as string;
+    const handleLogs = (req: Request, res: Response) => {
+        const deploymentId = (req.params.id || req.query.id) as string;
 
         if (!deploymentId) {
-            return res.status(400).json({ error: "Missing deployment ID parameter ?id=" });
+            return res.status(400).json({ error: "Missing deployment ID parameter ?id= or /logs/:id" });
         }
 
         // Set headers for Server-Sent Events (SSE)
@@ -20,29 +19,23 @@ export function setupSSELogStream(app: Express): void {
 
         console.log(`[SSE Log Stream] Client connected for deployment ID: ${deploymentId}`);
 
-        const redisClient = new Redis({
+        const redisConnection = {
             host: config.REDIS_HOST,
             port: config.REDIS_PORT,
             password: config.REDIS_PASSWORD,
-        });
+        };
 
-        const redisSubscriber = new Redis({
-            host: config.REDIS_HOST,
-            port: config.REDIS_PORT,
-            password: config.REDIS_PASSWORD,
-        });
+        const redisClient = new Redis(redisConnection);
+        const redisSubscriber = new Redis(redisConnection);
 
         const channel = `build-logs:${deploymentId}`;
         const historyKey = `build-logs-history:${deploymentId}`;
-
-        // this redis list is started in the builder/deployer ig
 
         // 1. Replay historical logs stored in Redis
         redisClient.lrange(historyKey, 0, -1, (err, logs) => {
             if (!err && logs && logs.length > 0) {
                 logs.forEach((logStr) => {
                     res.write(`data: ${logStr}\n\n`);
-                    // \n\n - this SSE ended
                 });
             }
         });
@@ -70,5 +63,9 @@ export function setupSSELogStream(app: Express): void {
             redisSubscriber.quit();
             redisClient.quit();
         });
-    });
+    };
+
+    // Support both /logs/:id and /logs?id=...
+    app.get("/logs/:id", handleLogs);
+    app.get("/logs", handleLogs);
 }
