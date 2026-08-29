@@ -1,3 +1,4 @@
+import http from "http";
 import { Worker, Job } from "bullmq";
 import Redis from "ioredis";
 import { downloadS3Folder, copyFinalDist } from "./aws";
@@ -62,4 +63,13 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, err) => {
     console.error(`[Deploy Service] Job ${job?.id} failed with error:`, err);
+});
+
+// Lightweight Health Check HTTP server for Render / Cloud Port Binding
+const healthPort = process.env.PORT || 3002;
+http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "healthy", service: "deploy-worker", uptime: process.uptime() }));
+}).listen(healthPort, () => {
+    console.log(`[Deploy Service] Health check server listening on port ${healthPort}`);
 });
