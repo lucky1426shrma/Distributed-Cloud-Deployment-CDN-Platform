@@ -13,14 +13,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/redis": "^4.0.11",
     "aws-sdk": "^2.1553.0",
     "bullmq": "^6.2.1",
     "dotenv": "^17.4.2",
-    "fs": "^0.0.1-security",
-    "ioredis": "^6.0.0",
-    "path": "^0.12.7",
-    "redis": "^4.6.13"
+    "ioredis": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
